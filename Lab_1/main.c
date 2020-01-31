@@ -11,5 +11,5 @@ void main(void)
     P4->DIR = 0xff;
     P8->OUT |= (BIT4 | BIT3| BIT2);
     P8->OUT &= ~BIT5;
-    P4->OUT = ~0x01;
+    P4->OUT = ~0x01; //Adjusts what turns on.
 }
