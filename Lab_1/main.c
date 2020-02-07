@@ -7,7 +7,7 @@
 unsigned int d = 0;
 unsigned int row = 0;
 unsigned int col = 0;
-unsigned int nums[] = {0x00, 0x00, 0x00, 0x00};
+unsigned int nums[] = {0xff, 0xff, 0xff, 0xff};
 unsigned int displays[] = {BIT5, BIT4, BIT3, BIT2};
 unsigned int rows[] = {BIT5, BIT4, BIT3, BIT2};
 unsigned int cols[] = {BIT3, BIT2, BIT1, BIT0};
@@ -102,7 +102,6 @@ void display_key() {
     P8->OUT &= ~displays[3];
     waitTime(10);
 
-    release_debouncing();
 
 //    switch(key) {
 //        case '1':
@@ -133,7 +132,7 @@ void press_debouncing() {
     while(count < 11) {
         if(count == 10){
             nums[d] = ~keys[row][col];
-            display_key();
+            release_debouncing();
             break;
         }
         else if(P9->IN & cols[col]) {
@@ -155,6 +154,7 @@ void scan(){
 
     while(1){
         P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
+        P4->OUT = 0xff;
         P8->DIR |= rows[k];
         P8->OUT &= ~rows[k];
         int i;
@@ -170,6 +170,7 @@ void scan(){
         if(k == 4){
            k = 0;
         }
+        display_key();
         waitTime(10);
     }
 }
@@ -177,13 +178,23 @@ void scan(){
 void main(void)
 {
     WDT_A->CTL = WDT_A_CTL_PW | WDT_A_CTL_HOLD;     // stop watchdog timer
-    P8->DIR = 0xff;
-    P4->DIR = 0xff;
+//    P8->DIR = 0xff;
+//    P4->DIR = 0xff;
+//
+//    P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
+//    P4->OUT = 0xff;
+//    P8->OUT &= ~BIT5;
+    //scan();
 
-    P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
-    P4->OUT = 0xff;
-    P8->OUT &= ~BIT5;
-    scan();
+    P2->DIR |= BIT5;
+    while(1){
+        P2->OUT &= ~BIT5;
+
+        waitTime(10000);
+
+        P2->OUT &= BIT5;
+    }
+
 }
 
 
