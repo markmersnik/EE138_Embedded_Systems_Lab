@@ -1,4 +1,5 @@
 #include "msp.h"
+#include <time.h>;
 
 /**
  * main.c
@@ -23,6 +24,12 @@ void waitTime(unsigned int time){
     while(i < time){
         i++;
     }
+}
+
+void delay(int seconds) {
+    int ms = 1000 * seconds;
+    clock_t start = clock();
+    while(clock() < start + ms);
 }
 
 void display_numbers(){
@@ -54,11 +61,15 @@ void display_numbers(){
 }
 
 void release_debouncing() {
+
     int count = 0;
+
     P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
     P8->DIR |= rows[row];
     P8->OUT &= ~rows[row];
+
     while(count < 10) {
+
         if(count == 10){
             break;
         }
@@ -101,35 +112,14 @@ void display_key() {
     P4->OUT = nums[3];
     P8->OUT &= ~displays[3];
     waitTime(10);
-
-
-//    switch(key) {
-//        case '1':
-//            P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
-//            P4->OUT = ~0x06;
-//            //P8->OUT &= ~displays[i];
-//            break;
-//        case '2' :
-//            P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
-//            P4->OUT = ~0x5B;
-//            P8->OUT &= ~displays[1];
-//            break;
-//        case '3' :
-//            P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
-//            P4->OUT = ~0x4F;
-//            P8->OUT &= ~displays[2];
-//            break;
-//        case 'A' :
-//            P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
-//            P4->OUT = 0x88;
-//            P8->OUT &= ~displays[3];
-//            break;
-//    }
 }
 
 void press_debouncing() {
+
     int count = 0;
+
     while(count < 11) {
+
         if(count == 10){
             nums[d] = ~keys[row][col];
             release_debouncing();
@@ -146,6 +136,7 @@ void press_debouncing() {
 }
 
 void scan(){
+
     unsigned int k = 0;
 
     P9->DIR &= ~BIT3;
@@ -153,10 +144,12 @@ void scan(){
 
 
     while(1){
+
         P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
         P4->OUT = 0xff;
         P8->DIR |= rows[k];
         P8->OUT &= ~rows[k];
+
         int i;
         for(i = 0; i < 4; i++){
             if(P9->IN & cols[i]) {
@@ -166,12 +159,43 @@ void scan(){
                 d++;
             }
         }
+
         k = k + 1;
+
         if(k == 4){
            k = 0;
         }
+
         display_key();
-        waitTime(10);
+    }
+}
+
+void normal_mode(){
+
+    P2->DIR |= BIT5;
+
+    int ms = 1000 * 5; //delay for 5 seconds
+    clock_t start = clock();
+    while(clock() < start + ms){
+
+    }
+}
+
+void locked_mode(){
+
+}
+
+void test_lockbox(){
+
+    P2->DIR |= BIT5;
+
+    while(1){
+
+        P2->OUT &= ~BIT5; //de-energizes (unlocks) the solenoid
+
+        delay(1);
+
+        P2->OUT |= BIT5; //energizes (locks) the solenoid
     }
 }
 
@@ -186,14 +210,7 @@ void main(void)
 //    P8->OUT &= ~BIT5;
     //scan();
 
-    P2->DIR |= BIT5;
-    while(1){
-        P2->OUT &= ~BIT5;
-
-        waitTime(10000);
-
-        P2->OUT &= BIT5;
-    }
+    test_lockbox();
 
 }
 
