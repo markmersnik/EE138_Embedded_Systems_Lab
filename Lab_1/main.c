@@ -1,11 +1,14 @@
 #include "msp.h"
-#include <time.h>;
+#include <time.h>
+#include <stdbool.h>
 
 /**
  * main.c
  */
 
 unsigned int d = 0;
+unsigned int k = 0;
+bool code_entered = false;
 unsigned int row = 0;
 unsigned int col = 0;
 unsigned int nums[] = {0xff, 0xff, 0xff, 0xff};
@@ -24,12 +27,6 @@ void waitTime(unsigned int time){
     while(i < time){
         i++;
     }
-}
-
-void delay(int seconds) {
-    int ms = 1000 * seconds;
-    clock_t start = clock();
-    while(clock() < start + ms);
 }
 
 void display_numbers(){
@@ -84,10 +81,11 @@ void release_debouncing() {
 
 void display_key() {
 
-    //unsigned int time = 0;
     if(d > 3){
         d = 0;
+        code_entered = true;
     }
+
 
     //Number 1
     P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
@@ -137,8 +135,6 @@ void press_debouncing() {
 
 void scan(){
 
-    unsigned int k = 0;
-
     P9->DIR &= ~BIT3;
     P9->OUT &= ~BIT3;
 
@@ -174,11 +170,8 @@ void normal_mode(){
 
     P2->DIR |= BIT5;
 
-    int ms = 1000 * 5; //delay for 5 seconds
-    clock_t start = clock();
-    while(clock() < start + ms){
 
-    }
+
 }
 
 void locked_mode(){
@@ -187,15 +180,15 @@ void locked_mode(){
 
 void test_lockbox(){
 
-    P2->DIR |= BIT5;
-
     while(1){
 
-        P2->OUT &= ~BIT5; //de-energizes (unlocks) the solenoid
+        P2->OUT |= BIT5; //de-energizes (locks) the solenoid
 
-        delay(1);
+        waitTime(3000000); //300000 is one second
 
-        P2->OUT |= BIT5; //energizes (locks) the solenoid
+        P2->OUT &= ~BIT5; //energizes (unlocks) the solenoid
+
+        waitTime(3000000);
     }
 }
 
@@ -209,6 +202,8 @@ void main(void)
 //    P4->OUT = 0xff;
 //    P8->OUT &= ~BIT5;
     //scan();
+
+    P2->DIR |= BIT5;
 
     test_lockbox();
 
