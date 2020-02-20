@@ -168,8 +168,10 @@ void press_debouncing() {
                     locking = false;
                     reset = true;
                 }
-
-                if(row == 3 && col == 2 && code_entered == false) {
+                if(row == 3 && col == 0) {
+                    reset = true;
+                }
+                else if(row == 3 && col == 2 && code_entered == false) {
                     P2->OUT &= ~BIT5;
                     waitTime(1500000);
                     P2->OUT |= BIT5;
@@ -182,7 +184,8 @@ void press_debouncing() {
                     for(j = 0; j < 4; j++) {
                         passcode[j] = nums[j];
                     }
-                } else if(code_entered == true) {
+                }
+                else if(code_entered == true) {
                     int j;
                     for (j = 0; j < 4; j++) {
                         nums[j] = 0xff;
@@ -234,7 +237,7 @@ void scan(){
     P8->OUT &= ~rows[k];
 
     int i;
-    for(i = 0; i < 4; i++){
+    for(i = 0; i < 3; i++){
         if(P9->IN & cols[i]) {
             row = k;
             col = i;
@@ -278,6 +281,7 @@ int locked_mode(){
         }
 
     }
+
     if(locking == true){
         locking = false;
         reset = true;
@@ -340,20 +344,6 @@ void normal_mode(){
         locked_mode();
     }
 }
-
-//void test_lockbox(){
-//
-//    while(1){
-//
-//        P2->OUT |= BIT5; //de-energizes (locks) the solenoid
-//
-//        waitTime(300000); //300000 is one second
-//
-//        P2->OUT &= ~BIT5; //energizes (unlocks) the solenoid
-//
-//        waitTime(300000);
-//    }
-//}
 
 void main(void){
 
