@@ -12,6 +12,7 @@ bool code_entered = false;
 bool locked= false;
 bool passcode_required = false;
 bool reset = false;
+bool locking = false;
 unsigned int wrong_passcode = 0;
 unsigned int row = 0;
 unsigned int col = 0;
@@ -74,33 +75,31 @@ void display_numbers(){
 }
 
 void lockdown(){
-    unsigned int i = 0;
     //10 second lockdown period
-    while(i < 3000){
-        //Number 1
-        P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
-        P4->OUT = ~0x40; //Adjusts what turns on.
-        P8->OUT &= ~BIT5;
-        waitTime(10);
+    //Number 1
+    P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
+    P4->OUT = ~0x40; //Adjusts what turns on.
+    P8->OUT &= ~BIT5;
+    waitTime(10);
 
-        //Number 2
-        P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
-        P4->OUT = ~0x40;
-        P8->OUT &= ~BIT4;
-        waitTime(10);
+    //Number 2
+    P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
+    P4->OUT = ~0x40;
+    P8->OUT &= ~BIT4;
+    waitTime(10);
 
-        //Number 3
-        P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
-        P4->OUT = ~0x40;
-        P8->OUT &= ~BIT3;
-        waitTime(10);
+    //Number 3
+    P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
+    P4->OUT = ~0x40;
+    P8->OUT &= ~BIT3;
+    waitTime(10);
 
-        //Number 4
-        P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
-        P4->OUT = ~0x40;
-        P8->OUT &= ~BIT2;
-        waitTime(10);
-    }
+    //Number 4
+    P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
+    P4->OUT = ~0x40;
+    P8->OUT &= ~BIT2;
+    waitTime(10);
+
 }
 
 void release_debouncing() {
@@ -165,6 +164,11 @@ void press_debouncing() {
             }
             //Normal mode
             if(locked == false) {
+                if(locking == true) {
+                    locking = false;
+                    reset = true;
+                }
+
                 if(row == 3 && col == 2 && code_entered == false) {
                     P2->OUT &= ~BIT5;
                     waitTime(1500000);
@@ -173,11 +177,16 @@ void press_debouncing() {
                 }
                 else if(row == 3 && col == 2 && code_entered == true) {
                     locked = true;
+                    locking = true;
                     int j;
                     for(j = 0; j < 4; j++) {
                         passcode[j] = nums[j];
                     }
-                    reset = true;
+                } else if(code_entered == true) {
+                    int j;
+                    for (j = 0; j < 4; j++) {
+                        nums[j] = 0xff;
+                    }
                 }
             }
             else {
@@ -201,7 +210,9 @@ void press_debouncing() {
                 }
             }
             code_entered = false;
-            nums[d] = ~keys[row][col];
+            if(locking == false) {
+                nums[d] = ~keys[row][col];
+            }
             release_debouncing();
             break;
         }
@@ -233,6 +244,7 @@ void scan(){
                 for (j = 0; j < 4; j++) {
                     nums[j] = 0xff;
                 }
+                display_key();
                 d = 0;
                 reset = false;
             }
@@ -251,36 +263,69 @@ void scan(){
     display_key();
 }
 
-void locked_mode(){
+int locked_mode(){
 
     unsigned int i = 0;
 
     locked = false;
-    while(i < 1500) {
+    while(i < 15000) {
 
         scan();
         i++;
 
+        if(locking == false) {
+            break;
+        }
+
     }
-    locked = true;
+    if(locking == true){
+        locking = false;
+        reset = true;
+        locked = true;
+        int j;
+        for (j = 0; j < 4; j++) {
+            nums[j] = 0xff;
+        }
+        display_key();
+    }
+    else {
+        locked = false;
+        int j;
+        for (j = 0; j < 4; j++) {
+            nums[j] = 0xff;
+            passcode[j] = 0x01;
+        }
+        return 0;
+    }
 
     passcode_required = true;
 
     while(locked == true) {
         if(wrong_passcode > 4) {
-            lockdown();
+            int z = 0;
+            //locked down for about 10 seconds
+            while(z < 60000){
+                lockdown();
+                z++;
+            }
+            display_key();
             wrong_passcode = 0;
         }
         scan();
     }
 
-    P2->DIR |= BIT5;
+    P2->OUT &= ~BIT5;
+    waitTime(750000);
+    P2->OUT |= BIT5;
+
+    return 1;
 
 }
 
 void normal_mode(){
 
     P2->DIR |= BIT5;
+    P2->OUT |= BIT5;
 
     while(1) {
 
@@ -310,8 +355,7 @@ void normal_mode(){
 //    }
 //}
 
-void main(void)
-{
+void main(void){
 
     WDT_A->CTL = WDT_A_CTL_PW | WDT_A_CTL_HOLD;     // stop watchdog timer
     P8->DIR = 0xff;
