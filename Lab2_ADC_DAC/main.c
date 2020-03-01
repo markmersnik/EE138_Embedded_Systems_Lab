@@ -70,6 +70,8 @@ void read() {
 
     uint16_t value = ADC14->MEM[0];
 
+    value = (value * 5)/4096;
+
     printf("%d\n", value);
 }
 
