@@ -1,5 +1,59 @@
 #include "msp.h"
+#include <math.h>
 #include <stdio.h>
+
+int ones;
+int tens;
+int hundreds;
+unsigned int digits[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x67};
+
+void waitTime(unsigned int time){
+    unsigned int i = 0;
+    while(i < time){
+        i++;
+    }
+}
+
+//Gets the individual digits to send to the display.
+void parse_volts(uint16_t value) {
+
+    int volts = roundf((value * 3.3)/16384 * 100);
+    ones = volts%10;
+    volts = volts/10;
+    tens = volts%10;
+    volts = volts/10;
+    hundreds = volts%10;
+
+}
+
+//Displays our individual digits on the display.
+void display() {
+    //Number 1
+    P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
+    P4->OUT = ~0x00;
+    P8->OUT &= ~BIT5;
+    waitTime(100);
+
+    //Number 2
+    P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
+    P4->OUT = ~(digits[hundreds] | 0x80); //Add the decimal point to the display output.
+    P8->OUT &= ~BIT4;
+    waitTime(100);
+
+    //Number 3
+    P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
+    P4->OUT = ~digits[tens];
+    P8->OUT &= ~BIT3;
+    waitTime(100);
+
+    //Number 4
+    P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
+    P4->OUT = ~digits[ones];
+    P8->OUT &= ~BIT2;
+    waitTime(100);
+
+    P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
+}
 
 void initialize_clock() {
 
@@ -70,9 +124,10 @@ void read() {
 
     uint16_t value = ADC14->MEM[0];
 
-    value = (value * 5)/4096;
+    parse_volts(value);
 
-    printf("%d\n", value);
+    display();
+
 }
 
 void main(void)
@@ -82,8 +137,17 @@ void main(void)
 	initialize_clock();
 	configure_ADC();
 
+	P8->DIR = 0xff;
+    P4->DIR = 0xff;
+
+    P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
+    P4->OUT = 0xff;
+    P8->OUT &= ~BIT5;
+
 	while(1) {
+
 	    read();
+
 	}
 
 }
