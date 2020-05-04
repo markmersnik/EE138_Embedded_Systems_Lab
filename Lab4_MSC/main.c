@@ -2,9 +2,12 @@
 #include <math.h>
 #include <stdio.h>
 
+
+int count = 0;
 int ones;
 int tens;
 int hundreds;
+int thousands;
 int points = 64;
 int i = 0;
 unsigned int bits_for_db[] = {BIT0, BIT1, BIT2, BIT3,
@@ -39,17 +42,35 @@ void parse_volts(uint16_t value) {
 
 }
 
+void parse_count(){
+    int value = count/60;
+    if(count < 0) {
+        P5->OUT |= 0x01;
+    }
+    else {
+        P5->OUT &= ~0x01;
+    }
+    ones = value%10;
+    value = value/10;
+    tens = value%10;
+    value = value/10;
+    hundreds = value%10;
+    value = value/10;
+    thousands = value%10;
+
+}
+
 //Displays our individual digits on the display.
 void display() {
     //Number 1
     P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
-    P4->OUT = ~0x00;
+    P4->OUT =  ~(digits[thousands]);
     P8->OUT &= ~BIT5;
     waitTime(100);
 
     //Number 2
     P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
-    P4->OUT = ~(digits[hundreds] | 0x80); //Add the decimal point to the display output.
+    P4->OUT = ~(digits[hundreds]);
     P8->OUT &= ~BIT4;
     waitTime(100);
 
@@ -141,10 +162,6 @@ void read_adc() {
     duty1value = roundf ((value*256)/16384);
     duty2value = 0xff - duty1value;
 
-    parse_volts(value);
-
-    display();
-
 }
 
 void output_dac(float outputValue){
@@ -201,12 +218,75 @@ void TA1_0_IRQHandler(void) {
 
 }
 
+void TimerA2_Init(){
+    TIMER_A2->CTL = 0x02C0;  //sets clock to SMCLK and divide input by /8
+    TIMER_A2->CCTL[0] = 0x0010;
+    TIMER_A2->CCR[0] = 0xff;   // compare match value
+    TIMER_A2->EX0 = 0x0007;    // configure for input clock divider /8 making 150Hz
+    NVIC->IP[3] = (NVIC->IP[3]&0xFFFFFF00)|0x00000040; // priority 2
+    NVIC->ISER[0] = 0x00001000;   // enable interrupt 12 in NVIC
+    TIMER_A2->CTL |= 0x0014;      // reset and start Timer A in up mode
+}
 
+//2 pins, p5.3 (phase B) and p3.6 (phase A)
+//the code assumes encoder count increase when turning CW and decrease when turning CCW
+//count is stored in a counter variable
+
+void Interrupt_Init() {
+    P3->SEL0 &= ~0x40;  //Function group set to 0 for IO
+    P3->SEL1 &= ~0x40;  //Function group set to 0 for IO
+    P3->DIR &= ~0x04;   //P3.6 set to input
+    P3->IES &= ~0x04;   //Interrupt Edge Selector set to 0 for rising edge
+    P3->IFG &= ~0x04;   //Interrupt Flag Register cleared (if its 1 then interrupt was triggered, has to be manually reset back to 0 each time)
+    P3->IE |= 0x04;     //Interrupt Enabled registers set to 1 (enabled)
+    NVIC->IP[9] = (NVIC->IP[9]&0x00FFFFFF)|0x40000000; //set to priority 2
+    NVIC->ISER[1] = 0x00000020; //page 116 in the manual. Sets IRQ 37 enabling Port3_IRQ
+
+    P5->SEL0 &= ~0x08;  //Function group set to 0 for IO
+    P5->SEL1 &= ~0x08;  //Function group set to 0 for IO
+    P5->DIR &= ~0x08;   //P5.3 set to input
+    P5->IES &= ~0x08;   //Interrupt Edge Selector set to 0 for rising edge
+    P5->IFG &= ~0x08;   //Interrupt Flag Register cleared (if its 1 then interrupt was triggered)
+    P5->IE |= 0x08;     //Interrupt Enabled registers set to 1 (enabled)
+    NVIC->IP[9] = (NVIC->IP[9]&0x00FFFFFF)|0x40000000; //set to priority 2
+    NVIC->ISER[1] = 0x00000080; //page 116 in the manual. Sets IRQ 39 enabling Port5_IRQ
+}
+
+void PORT3_IRQHandler(void)
+{
+    //check phase B logic state. if it is high, then decrease counter variable by 1
+    //else if it is low, then increase counter variable by 1
+    if(P5->IFG & 0x08) {
+        count++;
+    }
+    else {
+        count--;
+    }
+    P3->IFG &= ~0x04;
+}
+
+void PORT5_IRQHandler(void)
+{
+    // check phase A logic state. If Phase A pin is High, increase the counter by 1.
+    //else if it is low, then decrease counter variable by 1
+    if(P3->IFG & 0x04) {
+        count++;
+    }
+    else {
+        count--;
+    }
+    P5->IFG &= ~0x08;
+}
+
+void TA2_0_IRQHandler(void) {
+    parse_count();
+    display();
+    TIMER_A2->CCTL[0] &= ~(BIT0); //clear the int flag
+}
 
 void main(void)
 {
-
-    WDT_A->CTL = WDT_A_CTL_PW | WDT_A_CTL_HOLD;     // stop watchdog timer
+	WDT_A->CTL = WDT_A_CTL_PW | WDT_A_CTL_HOLD;		// stop watchdog timer
     initialize_clock();
     configure_ADC();
 
@@ -220,23 +300,23 @@ void main(void)
     P7->DIR = 0xff;
     P10->DIR = 0xff;
 
-    P6->SEL0 &= ~0x01; //clears bit 0
-    P6->SEL1 &= ~0x01; //
-    P6->DIR &= ~BIT0; //set direction to input
-    P6->OUT |= BIT0; //sets input to high (BIT 0 is a 1)
-    P6->REN |= BIT0; //enable pull up or pull down
-    P2->IES |= BIT2;  //  P2.2 falling edge interrupt
-    NVIC->ISER[1] |= 1 << (36 & 0x001F);
+//    P6->SEL0 &= ~0x01; //clears bit 0
+//    P6->SEL1 &= ~0x01; //
+//    P6->DIR &= ~BIT0; //set direction to input
+//    P6->OUT |= BIT0; //sets input to high (BIT 0 is a 1)
+//    P6->REN |= BIT0; //enable pull up or pull down
+//    P2->IES |= BIT2;  //  P2.2 falling edge interrupt
+//    NVIC->ISER[1] |= 1 << (36 & 0x001F);
+//
+//    NVIC->ISER[0] |= BIT(10); //enable interrupt
+//    NVIC->IP[10] &= ~(BIT7 | BIT6 | BIT5); //setting timer priority to 0
 
-    NVIC->ISER[0] |= BIT(10); //enable interrupt
-    NVIC->IP[10] &= ~(BIT7 | BIT6 | BIT5); //setting timer priority to 0
+    //New Lab 4 program to initialize interrupts
+	Interrupt_Init();
+	TimerA2_Init();
 
-    while(1) {
-
-        //TA1_0_IRQHandler();
-        //start_motor();
-
-    }
+	while(1) {
+	    start_motor();
+	}
 
 }
-
