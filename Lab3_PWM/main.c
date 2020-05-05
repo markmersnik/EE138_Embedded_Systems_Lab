@@ -234,7 +234,7 @@ void main(void)
     while(1) {
 
         //TA1_0_IRQHandler();
-        //start_motor();
+        start_motor();
 
     }
 

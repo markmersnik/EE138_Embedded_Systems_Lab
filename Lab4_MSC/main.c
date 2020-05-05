@@ -3,7 +3,8 @@
 #include <stdio.h>
 
 
-int count = 0;
+volatile int count = 0;
+int rpm;
 int ones;
 int tens;
 int hundreds;
@@ -30,33 +31,22 @@ void waitTime(unsigned int time){
     }
 }
 
-//Gets the individual digits to send to the display.
-void parse_volts(uint16_t value) {
+void parse_rpm(){
 
-    int volts = roundf((value * 3.3)/0x3fce * 100);
-    ones = volts%10;
-    volts = volts/10;
-    tens = volts%10;
-    volts = volts/10;
-    hundreds = volts%10;
-
-}
-
-void parse_count(){
-    int value = count/60;
-    if(count < 0) {
+    if(rpm < 0) {
         P5->OUT |= 0x01;
     }
     else {
         P5->OUT &= ~0x01;
     }
-    ones = value%10;
-    value = value/10;
-    tens = value%10;
-    value = value/10;
-    hundreds = value%10;
-    value = value/10;
-    thousands = value%10;
+
+    ones = rpm%10;
+    rpm = rpm/10;
+    tens = rpm%10;
+    rpm = rpm/10;
+    hundreds = rpm%10;
+    rpm = rpm/10;
+    thousands = rpm%10;
 
 }
 
@@ -218,12 +208,13 @@ void TA1_0_IRQHandler(void) {
 
 }
 
+//Timer_A register on page 797
 void TimerA2_Init(){
     TIMER_A2->CTL = 0x02C0;  //sets clock to SMCLK and divide input by /8
     TIMER_A2->CCTL[0] = 0x0010;
-    TIMER_A2->CCR[0] = 0xff;   // compare match value
+    TIMER_A2->CCR[0] = 0xffff;   // compare match value
     TIMER_A2->EX0 = 0x0007;    // configure for input clock divider /8 making 150Hz
-    NVIC->IP[3] = (NVIC->IP[3]&0xFFFFFF00)|0x00000040; // priority 2
+    NVIC->IP[3] = (NVIC->IP[3]&0xFFFFFF00)|0x00000060; // priority 2
     NVIC->ISER[0] = 0x00001000;   // enable interrupt 12 in NVIC
     TIMER_A2->CTL |= 0x0014;      // reset and start Timer A in up mode
 }
@@ -235,11 +226,11 @@ void TimerA2_Init(){
 void Interrupt_Init() {
     P3->SEL0 &= ~0x40;  //Function group set to 0 for IO
     P3->SEL1 &= ~0x40;  //Function group set to 0 for IO
-    P3->DIR &= ~0x04;   //P3.6 set to input
-    P3->IES &= ~0x04;   //Interrupt Edge Selector set to 0 for rising edge
-    P3->IFG &= ~0x04;   //Interrupt Flag Register cleared (if its 1 then interrupt was triggered, has to be manually reset back to 0 each time)
-    P3->IE |= 0x04;     //Interrupt Enabled registers set to 1 (enabled)
-    NVIC->IP[9] = (NVIC->IP[9]&0x00FFFFFF)|0x40000000; //set to priority 2
+    P3->DIR &= ~0x40;   //P3.6 set to input
+    P3->IES &= ~0x40;   //Interrupt Edge Selector set to 0 for rising edge
+    P3->IFG &= ~0x40;   //Interrupt Flag Register cleared (if its 1 then interrupt was triggered, has to be manually reset back to 0 each time)
+    P3->IE |= 0x40;     //Interrupt Enabled registers set to 1 (enabled)
+    NVIC->IP[9] = (NVIC->IP[9]&0x00FFFFFF)|0x40000000; //set to priority 3
     NVIC->ISER[1] = 0x00000020; //page 116 in the manual. Sets IRQ 37 enabling Port3_IRQ
 
     P5->SEL0 &= ~0x08;  //Function group set to 0 for IO
@@ -248,7 +239,9 @@ void Interrupt_Init() {
     P5->IES &= ~0x08;   //Interrupt Edge Selector set to 0 for rising edge
     P5->IFG &= ~0x08;   //Interrupt Flag Register cleared (if its 1 then interrupt was triggered)
     P5->IE |= 0x08;     //Interrupt Enabled registers set to 1 (enabled)
-    NVIC->IP[9] = (NVIC->IP[9]&0x00FFFFFF)|0x40000000; //set to priority 2
+
+    //NVIC registers on page 115
+    NVIC->IP[9] = (NVIC->IP[9]&0x00FFFFFF)|0x40000000; //set to priority 3
     NVIC->ISER[1] = 0x00000080; //page 116 in the manual. Sets IRQ 39 enabling Port5_IRQ
 }
 
@@ -256,20 +249,20 @@ void PORT3_IRQHandler(void)
 {
     //check phase B logic state. if it is high, then decrease counter variable by 1
     //else if it is low, then increase counter variable by 1
-    if(P5->IFG & 0x08) {
-        count++;
-    }
-    else {
+    if(P5->IN & 0x08) {
         count--;
     }
-    P3->IFG &= ~0x04;
+    else {
+        count++;
+    }
+    P3->IFG &= ~0x40;
 }
 
 void PORT5_IRQHandler(void)
 {
     // check phase A logic state. If Phase A pin is High, increase the counter by 1.
     //else if it is low, then decrease counter variable by 1
-    if(P3->IFG & 0x04) {
+    if(P3->IN & 0x40) {
         count++;
     }
     else {
@@ -279,8 +272,14 @@ void PORT5_IRQHandler(void)
 }
 
 void TA2_0_IRQHandler(void) {
-    parse_count();
-    display();
+    //start_motor();
+    rpm = (count * 187.5 * 60)/800;
+    y[1] = (0.9968)*y[0] + (0.004992)*rpm;
+    y[0] = y[1];
+    count = 0;
+    printf("%f", y[1]);
+//    parse_rpm();
+//    display();
     TIMER_A2->CCTL[0] &= ~(BIT0); //clear the int flag
 }
 
@@ -300,6 +299,8 @@ void main(void)
     P7->DIR = 0xff;
     P10->DIR = 0xff;
 
+    P5->DIR |= 0x01;    //sets P5.0 LED to output
+
 //    P6->SEL0 &= ~0x01; //clears bit 0
 //    P6->SEL1 &= ~0x01; //
 //    P6->DIR &= ~BIT0; //set direction to input
@@ -317,6 +318,9 @@ void main(void)
 
 	while(1) {
 	    start_motor();
+	    parse_rpm();
+	    display();
+	    waitTime(1000);
 	}
 
 }
