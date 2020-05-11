@@ -4,7 +4,7 @@
 
 
 volatile int count = 0;
-int rpm;
+float rpm;
 int ones;
 int tens;
 int hundreds;
@@ -17,8 +17,6 @@ unsigned int bits_for_db[] = {BIT0, BIT1, BIT2, BIT3,
 unsigned int digits[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x67};
 unsigned int new_sine[190];
 unsigned int value;
-int period = 1875;
-int pwm_period = 255;
 uint8_t duty1value;
 uint8_t duty2value;
 
@@ -37,48 +35,46 @@ void parse_rpm(){
 
     if(rpm < 0) {
         P5->OUT |= 0x01;
-        rpm = -1*rpm;
     }
     else {
         P5->OUT &= ~0x01;
     }
 
-    ones = rpm%10;
+    ones = (int)rpm%10;
     rpm = rpm/10;
-    tens = rpm%10;
+    tens = (int)rpm%10;
     rpm = rpm/10;
-    hundreds = rpm%10;
+    hundreds = (int)rpm%10;
     rpm = rpm/10;
-    thousands = rpm%10;
+    thousands = (int)rpm%10;
 
 }
 
 //Displays our individual digits on the display.
 void display() {
-
     //Number 1
     P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
     P4->OUT =  ~(digits[thousands]);
     P8->OUT &= ~BIT5;
-    waitTime(2000);
+    waitTime(100);
 
     //Number 2
     P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
     P4->OUT = ~(digits[hundreds]);
     P8->OUT &= ~BIT4;
-    waitTime(2000);
+    waitTime(100);
 
     //Number 3
     P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
     P4->OUT = ~digits[tens];
     P8->OUT &= ~BIT3;
-    waitTime(2000);
+    waitTime(100);
 
     //Number 4
     P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
     P4->OUT = ~digits[ones];
     P8->OUT &= ~BIT2;
-    waitTime(2000);
+    waitTime(100);
 
     P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
 }
@@ -99,15 +95,15 @@ void initialize_clock() {
     FLCTL->BANK1_RDCTL &= ~(BIT(12) | BIT(13) | BIT(14) | BIT(15)); //reset bits
     FLCTL->BANK1_RDCTL |= BIT(12); //bit 12 - 15: wait state number selection. 0001b = 1 wait states
 
-    //Clock source: DCO, nominal DCO frequency: 48MHz
+    //Clock source: DCO, nominal DCO frequency: 1.5MHz
     CS->KEY = 0x695A; //unlock CS registers(See Figure 6.7)
-    CS->CTL0 |= BIT(18) | BIT(16); //DCORSEL frequency range = 48Mhz(See Figure 6.7)
-    CS->CTL0 |= BIT(23); //DCOEN, enables DCO oscillator(See Figure 6.7))
+    CS->CTL0 &= ~(BIT(16) | BIT(17) | BIT(18)); //DCORSEL frequency range = 1.5Mhz(See Figure 6.7)
+    CS->CTL0 |= BIT(23); //DCOEN, enables DCO oscillator(See Figure 6.7)
 
     //2.The requested clock signal (SMCLK) is enabled:
     //Clock signal that uses DCO: SMCLK
     CS->CTL1 |= BIT(4) | BIT(5); //SMCLK source: DCOCLK(See Figure 6.8)
-    CS->CTL1 |= BIT(28) | BIT(29) | BIT(30); // divides clock by 128 making about 375kHz
+    CS->CTL1 &= ~(BIT(28) | BIT(29) | BIT(30)); // divides clock by 128 making about 12kHz
     CS->CLKEN |= BIT(3); //Enable SMCLK (SMCLK_EN)(See Figure 6.9)
     CS->KEY = 0x0; //lock CS registers(See Figure 6.7)
 
@@ -153,11 +149,8 @@ void read_adc() {
 
     value = ADC14->MEM[0];
 
-    duty1value = (value*(pwm_period))/16384;
-    if(duty1value > (pwm_period-1)) {
-        duty1value = pwm_period-1;
-    }
-    duty2value = pwm_period - duty1value;
+    duty1value = roundf ((value*256)/16384);
+    duty2value = 0xff - duty1value;
 
 }
 
@@ -180,37 +173,49 @@ void configure_PWM(uint16_t duty1, uint16_t duty2){
     P2->SEL0 |= 0x30; // P2.4, P2.5 Timer0A functions
     P2->SEL1 &= ~0x30; // P2.4, P2.5 Timer0A functions
     TIMER_A0->CCTL[0] = 0x0080; // CCI0 toggle
-    TIMER_A0->CCTL[0] &= ~(0x0010); // CCI0 toggle
-    TIMER_A0->CCR[0] = pwm_period; //CCR0 is set to 0xff which is our period (375kHz/255)
+    TIMER_A0->CCR[0] = 0xff; //CCR0 is set to 0xff which is our period
     TIMER_A0->EX0 = 0x0000; // divide by 1
-    TIMER_A0->CCTL[1] = 0x0060; // CCR1 set/reset
+    TIMER_A0->CCTL[1] = 0x0040; // CCR1 toggle/reset
     TIMER_A0->CCR[1] = duty1; // CCR1 duty cycle is duty1/period
-    TIMER_A0->CCTL[2] = 0x0060; // CCR2 set/reset
+    TIMER_A0->CCTL[2] = 0x0040; // CCR2 toggle/reset
     TIMER_A0->CCR[2] = duty2; // CCR2 duty cycle is duty2/period
-    TIMER_A0->CTL = 0x0210; // SMCLK=375kHz, divide by 1, up mode
+    TIMER_A0->CTL = 0x0230; // SMCLK=11.72kHz, divide by 1, up-down mode
 
-}
-
-void run_PWM(uint16_t duty1, uint16_t duty2) {
-    TIMER_A0->CCR[1] = duty1; // CCR1 duty cycle is duty1/period
-    TIMER_A0->CCR[2] = duty2; // CCR2 duty cycle is duty2/period
 }
 
 void start_motor() {
     //P2.4 (U) and P2.5 (V) control the motor.
     //Average voltage across the motor V = 24(D_u - D_v).
     read_adc();
-    run_PWM(duty1value, duty2value);
+    configure_PWM(duty1value, duty2value);
+
+}
+
+void TA1_0_IRQHandler(void) {
+
+    NVIC->ISER[0] |= BIT(0); //disable interrupt2
+    read_adc();
+    x[0] = value; //store input values
+    y[0] = (1.934f * y[1]) + (-0.969f * y[2]) + x[0] + (-1.965f * x[1]) + (0.998f * x[2]);
+    output_dac(y[0]); //output the result to DAC
+
+    y[2] = y[1];
+    y[1] = y[0];
+    x[2] = x[1];
+    x[1] = x[0]; //update for next iteration
+
+    TIMER_A1->CCTL[0] &= ~(BIT0); //clear the int flag
 
 }
 
 //Timer_A register on page 797
 void TimerA2_Init(){
-    TIMER_A2->CTL = 0x0200;  //sets clock to SMCLK
-    TIMER_A2->CCTL[0] = 0x0010;  //enables the interrupt
-    TIMER_A2->CCR[0] = period;   // input of 1875 as divider (counts up to this every cycle) making 200Hz
+    TIMER_A2->CTL = 0x02C0;  //sets clock to SMCLK and divide input by /8
+    TIMER_A2->CCTL[0] = 0x0010;
+    TIMER_A2->CCR[0] = 0xffff;   // compare match value
+    TIMER_A2->EX0 = 0x0007;    // configure for input clock divider /8 making 150Hz
     NVIC->IP[3] = (NVIC->IP[3]&0xFFFFFF00)|0x00000060; // priority 2
-    NVIC->ISER[0] |= 0x00001000;   // enable interrupt 12 in NVIC
+    NVIC->ISER[0] = 0x00001000;   // enable interrupt 12 in NVIC
     TIMER_A2->CTL |= 0x0014;      // reset and start Timer A in up mode
 }
 
@@ -226,7 +231,7 @@ void Interrupt_Init() {
     P3->IFG &= ~0x40;   //Interrupt Flag Register cleared (if its 1 then interrupt was triggered, has to be manually reset back to 0 each time)
     P3->IE |= 0x40;     //Interrupt Enabled registers set to 1 (enabled)
     NVIC->IP[9] = (NVIC->IP[9]&0x00FFFFFF)|0x40000000; //set to priority 3
-    NVIC->ISER[1] |= 0x00000020; //page 116 in the manual. Sets IRQ 37 enabling Port3_IRQ
+    NVIC->ISER[1] = 0x00000020; //page 116 in the manual. Sets IRQ 37 enabling Port3_IRQ
 
     P5->SEL0 &= ~0x08;  //Function group set to 0 for IO
     P5->SEL1 &= ~0x08;  //Function group set to 0 for IO
@@ -237,7 +242,7 @@ void Interrupt_Init() {
 
     //NVIC registers on page 115
     NVIC->IP[9] = (NVIC->IP[9]&0x00FFFFFF)|0x40000000; //set to priority 3
-    NVIC->ISER[1] |= 0x00000080; //page 116 in the manual. Sets IRQ 39 enabling Port5_IRQ
+    NVIC->ISER[1] = 0x00000080; //page 116 in the manual. Sets IRQ 39 enabling Port5_IRQ
 }
 
 void PORT3_IRQHandler(void)
@@ -267,13 +272,13 @@ void PORT5_IRQHandler(void)
 }
 
 void TA2_0_IRQHandler(void) {
-    rpm = (count * 200 * 60)/800;
+    rpm = (count * 187.5 * 60)/800;
     y[1] = (0.9968)*y[0] + (0.004992)*rpm;
     y[0] = y[1];
     count = 0;
-//    start_motor();
-//    parse_rpm();
-//    display();
+    start_motor();
+    parse_rpm();
+    display();
     TIMER_A2->CCTL[0] &= ~(BIT0); //clear the int flag
 }
 
@@ -307,16 +312,13 @@ void main(void)
 //    NVIC->IP[10] &= ~(BIT7 | BIT6 | BIT5); //setting timer priority to 0
 
     //New Lab 4 program to initialize interrupts
-    read_adc();
-    configure_PWM(duty1value, duty2value);
 	Interrupt_Init();
 	TimerA2_Init();
 
 	while(1) {
-	    start_motor();
-	    parse_rpm();
-	    display(); //this is the issue with the motor
-	    //waitTime(1000);
+	    //start_motor();
+	    //display();
+	    //aitTime(1000);
 	}
 
 }
