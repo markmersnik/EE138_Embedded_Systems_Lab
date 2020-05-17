@@ -1,14 +1,17 @@
 #include "msp.h"
 #include <math.h>
 #include <stdio.h>
-
+#include <stdbool.h>
 
 volatile int count = 0;
 int rpm;
+int row;
+int col;
 int ones;
 int tens;
 int hundreds;
 int thousands;
+int position = 0;
 int points = 64;
 int i = 0;
 unsigned int bits_for_db[] = {BIT0, BIT1, BIT2, BIT3,
@@ -16,11 +19,18 @@ unsigned int bits_for_db[] = {BIT0, BIT1, BIT2, BIT3,
                               BIT0, BIT1, BIT2, BIT3};
 unsigned int digits[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x67};
 unsigned int new_sine[190];
+unsigned int rows[] = {BIT5, BIT4, BIT3, BIT2};
+unsigned int cols[] = {BIT3, BIT2, BIT1, BIT0};
 unsigned int value;
 int period = 1875;
 int pwm_period = 255;
+int stop = 8192;
+int rpm1500 = 9640;
 uint8_t duty1value;
 uint8_t duty2value;
+bool speed_mode = false;
+bool idle_mode = false;
+bool pos_ctrl_mode = false;
 
 float y[] = {0, 0, 0};
 float x[] = {0, 0, 0};
@@ -61,25 +71,25 @@ void display() {
     P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
     P4->OUT =  ~(digits[thousands]);
     P8->OUT &= ~BIT5;
-    waitTime(2000);
+    waitTime(3125);
 
     //Number 2
     P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
     P4->OUT = ~(digits[hundreds]);
     P8->OUT &= ~BIT4;
-    waitTime(2000);
+    waitTime(3125);
 
     //Number 3
     P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
     P4->OUT = ~digits[tens];
     P8->OUT &= ~BIT3;
-    waitTime(2000);
+    waitTime(3125);
 
     //Number 4
     P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
     P4->OUT = ~digits[ones];
     P8->OUT &= ~BIT2;
-    waitTime(2000);
+    waitTime(3125);
 
     P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
 }
@@ -197,22 +207,112 @@ void run_PWM(uint16_t duty1, uint16_t duty2) {
     TIMER_A0->CCR[2] = duty2; // CCR2 duty cycle is duty2/period
 }
 
-void start_motor() {
+void run_motor(int speed) {
     //P2.4 (U) and P2.5 (V) control the motor.
     //Average voltage across the motor V = 24(D_u - D_v).
-    read_adc();
+    duty1value = (speed*(pwm_period))/16384;
+    if(duty1value > (pwm_period-1)) {
+        duty1value = pwm_period-1;
+    }
+    duty2value = pwm_period - duty1value;
     run_PWM(duty1value, duty2value);
 
 }
 
+void release_debouncing() {
+
+    int count = 0;
+
+    P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
+    P8->DIR |= rows[row];
+    P8->OUT &= ~rows[row];
+
+    while(count < 10) {
+
+        if(count == 10){
+            break;
+        }
+        else if(P9->IN & cols[col]) {
+            count = 0;
+        }
+        else if (P9->IN & ~cols[col]){
+            count++;
+        }
+    }
+}
+
+void press_debouncing() {
+
+    int count = 0;
+
+    while(count < 11) {
+
+        if(count == 10){
+
+            if(col == 0){
+                speed_mode = true;
+            }
+            else if(col == 1 && row == 0) {
+                pos_ctrl_mode = true;
+            }
+            else if(col == 1 && row == 3){
+                idle_mode = true;
+            }
+            release_debouncing();
+            break;
+        }
+        else if(P9->IN & cols[col]) {
+           count++;
+        }
+        else if (P9->IN & ~cols[col]){
+           count = 0;
+           break;
+        }
+
+    }
+}
+
+void scan(){
+
+    P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
+    P4->OUT = 0xff;
+    P8->DIR |= rows[0];
+    P8->OUT &= ~rows[0];
+
+    if(P9->IN & cols[0]) {
+        row = 0;
+        col = 0;
+        press_debouncing();
+    }
+
+    if(P9->IN & cols[1]) {
+        row = 0;
+        col = 1;
+        press_debouncing();
+    }
+
+    P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
+    P4->OUT = 0xff;
+    P8->DIR |= rows[3];
+    P8->OUT &= ~rows[3];
+
+    if(P9->IN & cols[1]) {
+        row = 3;
+        col = 1;
+        press_debouncing();
+    }
+
+    display();
+}
+
 //Timer_A register on page 797
-void TimerA2_Init(){
-    TIMER_A2->CTL = 0x0200;  //sets clock to SMCLK
-    TIMER_A2->CCTL[0] = 0x0010;  //enables the interrupt
-    TIMER_A2->CCR[0] = period;   // input of 1875 as divider (counts up to this every cycle) making 200Hz
-    NVIC->IP[3] = (NVIC->IP[3]&0xFFFFFF00)|0x00000060; // priority 2
-    NVIC->ISER[0] |= 0x00001000;   // enable interrupt 12 in NVIC
-    TIMER_A2->CTL |= 0x0014;      // reset and start Timer A in up mode
+void TimerA1_Init(void){
+    TIMER_A1->CTL = 0x0200;  //sets clock to SMCLK
+    TIMER_A1->CCTL[0] = 0x0010;  //enables the interrupt
+    TIMER_A1->CCR[0] = period;   // input of 1875 as divider (counts up to this every cycle) making 200Hz
+    NVIC->IP[2] = (NVIC->IP[2]&0xFF00FFFF)|0x00600000; // priority 3
+    NVIC->ISER[0] = 0x00000400;   // enable interrupt 10 in NVIC
+    TIMER_A1->CTL |= 0x0014;      // reset and start Timer A in up mode
 }
 
 //2 pins, p5.3 (phase B) and p3.6 (phase A)
@@ -226,7 +326,7 @@ void Interrupt_Init() {
     P3->IES &= ~0x40;   //Interrupt Edge Selector set to 0 for rising edge
     P3->IFG &= ~0x40;   //Interrupt Flag Register cleared (if its 1 then interrupt was triggered, has to be manually reset back to 0 each time)
     P3->IE |= 0x40;     //Interrupt Enabled registers set to 1 (enabled)
-    NVIC->IP[9] = (NVIC->IP[9]&0x00FFFFFF)|0x40000000; //set to priority 3
+    NVIC->IP[9] = (NVIC->IP[9]&0x00FFFFFF)|0x40000000; //set to priority 2
     NVIC->ISER[1] |= 0x00000020; //page 116 in the manual. Sets IRQ 37 enabling Port3_IRQ
 
     P5->SEL0 &= ~0x08;  //Function group set to 0 for IO
@@ -237,7 +337,7 @@ void Interrupt_Init() {
     P5->IE |= 0x08;     //Interrupt Enabled registers set to 1 (enabled)
 
     //NVIC registers on page 115
-    NVIC->IP[9] = (NVIC->IP[9]&0x00FFFFFF)|0x40000000; //set to priority 3
+    NVIC->IP[9] = (NVIC->IP[9]&0x00FFFFFF)|0x40000000; //set to priority 2
     NVIC->ISER[1] |= 0x00000080; //page 116 in the manual. Sets IRQ 39 enabling Port5_IRQ
 }
 
@@ -247,9 +347,11 @@ void PORT3_IRQHandler(void)
     //else if it is low, then increase counter variable by 1
     if(P5->IN & 0x08) {
         count--;
+        position--;
     }
     else {
         count++;
+        position++;
     }
     P3->IFG &= ~0x40;
 }
@@ -260,24 +362,107 @@ void PORT5_IRQHandler(void)
     //else if it is low, then decrease counter variable by 1
     if(P3->IN & 0x40) {
         count++;
+        position++;
     }
     else {
         count--;
+        position--;
     }
     P5->IFG &= ~0x08;
 }
 
-void TA2_0_IRQHandler(void) {
+void TA1_0_IRQHandler(void) {
     rpm = (count * 200 * 60)/800;
-    y[1] = (0.9968)*y[0] + (0.004992)*rpm;
-    y[0] = y[1];
     count = 0;
-    TIMER_A2->CCTL[0] &= ~(BIT0); //clear the int flag
+    x[0] = rpm;
+    //y[0] = (0.004992)*x[2]; //removal of y values allows program to run properly?
+    //rpm = y[0];
+    y[2] = y[1];
+    y[1] = y[0];
+    x[2] = x[1];
+    x[1] = x[0];
+    TIMER_A1->CCTL[0] &= ~(BIT0); //clear the int flag
+}
+
+void accelerate() {
+    int j = rpm1500 - stop; //j = 1532
+    while(j > 0) {
+        run_motor(rpm1500 - j);
+        parse_rpm();
+        display();
+        j = j - 1;
+    }
+}
+
+void decelerate() {
+    int j = rpm1500 - stop; //j = 1532
+        while(j > 0) {
+            run_motor(stop + j);
+            parse_rpm();
+            display();
+            j = j - 1;
+        }
+}
+
+void pos_ctrl() {
+    pos_ctrl_mode = false;
+    position = 0;
+    while(idle_mode == false && speed_mode == false) {
+        if(position > 300) {
+            waitTime(1000000);
+            while(position > 300){
+                rpm = (int)(position/1280)*360;
+                parse_rpm();
+                display();
+                run_motor(9000);
+            }
+            run_motor(stop);
+        }
+        else if(position < -300) {
+            waitTime(1000000);
+            while(position < -300){
+                rpm = (int)(position/1280)*360;
+                parse_rpm();
+                display();
+                run_motor(7000);
+            }
+            run_motor(stop);
+        }
+        scan();
+    }
+    idle_mode = false;
+}
+
+void spd_ctrl() {
+    speed_mode = false;
+    accelerate();
+    while(idle_mode == false && pos_ctrl_mode == false) {
+        scan();
+        run_motor(rpm1500);
+        parse_rpm();
+        display();
+    }
+    idle_mode = false;
+    decelerate();
+}
+
+void idle() {
+    while(1) {
+        if(speed_mode == true) {
+            spd_ctrl();
+        }
+        if(pos_ctrl_mode == true) {
+            pos_ctrl();
+        }
+        scan();
+        run_motor(stop);
+        display();
+    }
 }
 
 void main(void)
 {
-	WDT_A->CTL = WDT_A_CTL_PW | WDT_A_CTL_HOLD;		// stop watchdog timer
+    WDT_A->CTL = WDT_A_CTL_PW | WDT_A_CTL_HOLD;     // stop watchdog timer
     initialize_clock();
     configure_ADC();
 
@@ -288,32 +473,23 @@ void main(void)
     P4->OUT = 0xff;
     P8->OUT &= ~BIT5;
 
+    P9->DIR &= ~BIT3;
+    P9->OUT &= ~BIT3; //senses keypad input
+
     P7->DIR = 0xff;
     P10->DIR = 0xff;
 
     P5->DIR |= 0x01;    //sets P5.0 LED to output
 
-//    P6->SEL0 &= ~0x01; //clears bit 0
-//    P6->SEL1 &= ~0x01; //
-//    P6->DIR &= ~BIT0; //set direction to input
-//    P6->OUT |= BIT0; //sets input to high (BIT 0 is a 1)
-//    P6->REN |= BIT0; //enable pull up or pull down
-//    P2->IES |= BIT2;  //  P2.2 falling edge interrupt
-//    NVIC->ISER[1] |= 1 << (36 & 0x001F);
-//
-//    NVIC->ISER[0] |= BIT(10); //enable interrupt
-//    NVIC->IP[10] &= ~(BIT7 | BIT6 | BIT5); //setting timer priority to 0
 
-    //New Lab 4 program to initialize interrupts
     read_adc();
     configure_PWM(duty1value, duty2value);
-	Interrupt_Init();
-	TimerA2_Init();
+    Interrupt_Init();
+    TimerA1_Init();
+    idle();
 
-	while(1) {
-	    start_motor();
-	    parse_rpm();
-	    display();
-	}
+    while(1) {
+
+    }
 
 }
