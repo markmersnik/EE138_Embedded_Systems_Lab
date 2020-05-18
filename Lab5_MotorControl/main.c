@@ -43,6 +43,7 @@ void waitTime(unsigned int time){
     }
 }
 
+//Gets the rpm value ready for the display.
 void parse_rpm(){
 
     if(rpm < 0) {
@@ -54,6 +55,27 @@ void parse_rpm(){
     }
     double hold = rpm * 0.8;
     rpm = (int) hold;
+    ones = rpm%10;
+    rpm = rpm/10;
+    tens = rpm%10;
+    rpm = rpm/10;
+    hundreds = rpm%10;
+    rpm = rpm/10;
+    thousands = rpm%10;
+
+}
+
+//Gets the position value ready for the display.
+void parse_pos(){
+
+    if(rpm < 0) {
+        P5->OUT |= 0x01;
+        rpm = -1*rpm;
+    }
+    else {
+        P5->OUT &= ~0x01;
+    }
+
     ones = rpm%10;
     rpm = rpm/10;
     tens = rpm%10;
@@ -202,11 +224,13 @@ void configure_PWM(uint16_t duty1, uint16_t duty2){
 
 }
 
+//sets
 void run_PWM(uint16_t duty1, uint16_t duty2) {
     TIMER_A0->CCR[1] = duty1; // CCR1 duty cycle is duty1/period
     TIMER_A0->CCR[2] = duty2; // CCR2 duty cycle is duty2/period
 }
 
+//Starts the motor and sets the speed.
 void run_motor(int speed) {
     //P2.4 (U) and P2.5 (V) control the motor.
     //Average voltage across the motor V = 24(D_u - D_v).
@@ -219,6 +243,7 @@ void run_motor(int speed) {
 
 }
 
+//Check if button was released
 void release_debouncing() {
 
     int count = 0;
@@ -241,6 +266,7 @@ void release_debouncing() {
     }
 }
 
+//Checks that button was actually pressed.
 void press_debouncing() {
 
     int count = 0;
@@ -272,6 +298,7 @@ void press_debouncing() {
     }
 }
 
+//Scans to see if and which button was pressed.
 void scan(){
 
     P8->OUT |= (BIT5 | BIT4 | BIT3| BIT2);
@@ -341,6 +368,7 @@ void Interrupt_Init() {
     NVIC->ISER[1] |= 0x00000080; //page 116 in the manual. Sets IRQ 39 enabling Port5_IRQ
 }
 
+//Port 3 and 5 handlers deal with motor movement and direction.
 void PORT3_IRQHandler(void)
 {
     //check phase B logic state. if it is high, then decrease counter variable by 1
@@ -371,19 +399,19 @@ void PORT5_IRQHandler(void)
     P5->IFG &= ~0x08;
 }
 
+//Calculates the RPM at a frequency of 200Hz using our low pass filter
 void TA1_0_IRQHandler(void) {
     rpm = (count * 200 * 60)/800;
     count = 0;
     x[0] = rpm;
-    //y[0] = (0.004992)*x[2]; //removal of y values allows program to run properly?
-    //rpm = y[0];
-    y[2] = y[1];
+    y[0] = 0.9691 * y[1] + 0.03093 * x[1];
+    rpm = y[0];
     y[1] = y[0];
-    x[2] = x[1];
     x[1] = x[0];
     TIMER_A1->CCTL[0] &= ~(BIT0); //clear the int flag
 }
 
+//Accelerates the motor to 1500rpm over 5 seconds.
 void accelerate() {
     int j = rpm1500 - stop; //j = 1532
     while(j > 0) {
@@ -394,6 +422,7 @@ void accelerate() {
     }
 }
 
+//Decelerates the motor from 1500rpm to 0 over 5 seconds.
 void decelerate() {
     int j = rpm1500 - stop; //j = 1532
         while(j > 0) {
@@ -404,6 +433,7 @@ void decelerate() {
         }
 }
 
+//(Button 2) PID controller part (Position control mode)
 void pos_ctrl() {
     pos_ctrl_mode = false;
     position = 0;
@@ -412,7 +442,7 @@ void pos_ctrl() {
             waitTime(1000000);
             while(position > 300){
                 rpm = (int)(position/1280)*360;
-                parse_rpm();
+                parse_pos();
                 display();
                 run_motor(9000);
             }
@@ -422,7 +452,7 @@ void pos_ctrl() {
             waitTime(1000000);
             while(position < -300){
                 rpm = (int)(position/1280)*360;
-                parse_rpm();
+                parse_pos();
                 display();
                 run_motor(7000);
             }
@@ -433,6 +463,7 @@ void pos_ctrl() {
     idle_mode = false;
 }
 
+//(Button 1) Speed control mode, accelerates motor to 1500rpm over 5 seconds then maintains that speed until button 0 or 2 pressed.
 void spd_ctrl() {
     speed_mode = false;
     accelerate();
@@ -446,6 +477,7 @@ void spd_ctrl() {
     decelerate();
 }
 
+//(Button 0) idle mode where the motor is stopped
 void idle() {
     while(1) {
         if(speed_mode == true) {
